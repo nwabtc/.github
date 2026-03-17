@@ -1,0 +1,35 @@
+name: Update NOSTR Reads
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Every hour
+  workflow_dispatch:  # Manual button in GitHub UI
+
+permissions:
+  contents: write  # IMPORTANT: Allows the bot to commit files
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Fetch reads from Primal
+        run: |
+          mkdir -p data
+          # Fetch and wrap in proper JSON structure
+          curl -s "https://api.primal.net/v1/feed?pubkey=3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d&kind=30023&limit=50" > /tmp/raw.json
+          
+          # Create properly formatted JSON with timestamp
+          TIMESTAMP=$(date +%s)
+          echo "{\"lastUpdated\": $TIMESTAMP, \"data\": $(cat /tmp/raw.json)}" > data/reads.json
+          
+          # Verify it's valid JSON
+          cat data/reads.json | jq . > /dev/null && echo "Valid JSON created" || echo "Invalid JSON"
+      
+      - name: Commit and push if changed
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/reads.json
+          git diff --staged --quiet || (git commit -m "Update reads: $(date)" && git push)
