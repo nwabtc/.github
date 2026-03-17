@@ -14,24 +14,49 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      - name: Fetch reads via HTTP API
+      - name: Fetch reads with Python
         run: |
           mkdir -p data
+          python3 << 'EOF'
+          import urllib.request
+          import json
+          import time
+          import ssl
           
-          # Use nostr.band API (reliable HTTP, no WebSockets)
-          curl -s "https://api.nostr.band/v0/events?authors=3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d&kinds=30023&limit=50" > /tmp/response.json
+          # Try multiple APIs
+          apis = [
+              "https://api.nostr.band/v0/events?authors[]=3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d&kinds[]=30023&limit=50",
+              "https://nostr.wine/api/events?authors=3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d&kinds=30023&limit=50"
+          ]
           
-          # Check if we got valid data
-          if [ -s /tmp/response.json ]; then
-            TIMESTAMP=$(date +%s)
-            # Extract the events array from the response
-            EVENTS=$(cat /tmp/response.json | jq '.events // []')
-            echo "{\"lastUpdated\": $TIMESTAMP, \"data\": $EVENTS}" > data/reads.json
-            echo "Success: $(echo $EVENTS | jq 'length') reads found"
-          else
-            echo "Error: Empty response from API"
-            exit 1
-          fi
+          data = []
+          for url in apis:
+              try:
+                  print(f"Trying: {url[:50]}...")
+                  ctx = ssl.create_default_context()
+                  with urllib.request.urlopen(url, timeout=15, context=ctx) as response:
+                      result = json.loads(response.read().decode())
+                      if isinstance(result, dict) and 'events' in result:
+                          data = result['events']
+                      elif isinstance(result, list):
+                          data = result
+                      if len(data) > 0:
+                          print(f"Success! Found {len(data)} reads")
+                          break
+              except Exception as e:
+                  print(f"Failed: {e}")
+                  continue
+          
+          output = {
+              "lastUpdated": int(time.time()),
+              "data": data
+          }
+          
+          with open("data/reads.json", "w") as f:
+              json.dump(output, f, indent=2)
+          
+          print(f"Saved {len(data)} reads to data/reads.json")
+          EOF
       
       - name: Commit and push
         run: |
